@@ -153,7 +153,7 @@ func (i *inmemStore) List(
 			select {
 			case <-ctx.Done():
 				return
-			case res <- &gkvstore.Result{it, err}:
+			case res <- &gkvstore.Result{Val: it, Err: err}:
 			}
 			if int64(count) == opts.Limit {
 				return
@@ -184,7 +184,7 @@ func (i *inmemStore) List(
 				select {
 				case <-ctx.Done():
 					return
-				case res <- &gkvstore.Result{it, err}:
+				case res <- &gkvstore.Result{Val: it, Err: err}:
 					count++
 				}
 				if int64(count) == opts.Limit {
