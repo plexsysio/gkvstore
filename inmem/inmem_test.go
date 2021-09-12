@@ -10,3 +10,7 @@ import (
 func TestSuite(t *testing.T) {
 	testsuite.RunTestsuite(t, inmem.New(), testsuite.Advanced)
 }
+
+func BenchmarkSuite(b *testing.B) {
+	testsuite.BenchmarkSuite(b, inmem.New())
+}
