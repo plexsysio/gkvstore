@@ -46,6 +46,7 @@ func (t *testBStruct) Marshal() ([]byte, error) {
 		}
 	}
 	var buf bytes.Buffer
+	defer buf.Reset()
 	err := gob.NewEncoder(&buf).Encode(t)
 	if err != nil {
 		return nil, err
@@ -55,6 +56,7 @@ func (t *testBStruct) Marshal() ([]byte, error) {
 
 func (t *testBStruct) Unmarshal(buf []byte) error {
 	bw := bytes.NewBuffer(buf)
+	defer bw.Reset()
 	return gob.NewDecoder(bw).Decode(t)
 }
 
