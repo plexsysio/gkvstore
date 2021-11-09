@@ -13,7 +13,6 @@ import (
 )
 
 type inmemStore struct {
-	lk    sync.Mutex
 	nonce atomic.Int64
 	mp    map[string][]byte
 	ttIdx map[string]*ttIndex
@@ -26,19 +25,11 @@ func New() gkvstore.Store {
 	}
 }
 
-func (i *inmemStore) synchronize() func() {
-	i.lk.Lock()
-	return func() {
-		i.lk.Unlock()
-	}
-}
-
 func key(item gkvstore.Item) string {
 	return fmt.Sprintf("/%s/%s", item.GetNamespace(), item.GetID())
 }
 
 func (i *inmemStore) Create(ctx context.Context, item gkvstore.Item) error {
-	defer i.synchronize()()
 
 	if ids, ok := item.(gkvstore.IDSetter); ok {
 		ids.SetID(fmt.Sprintf("%d", i.nonce.Inc()))
@@ -71,7 +62,6 @@ func (i *inmemStore) Create(ctx context.Context, item gkvstore.Item) error {
 }
 
 func (i *inmemStore) Read(ctx context.Context, item gkvstore.Item) error {
-	defer i.synchronize()()
 
 	itemBuf, found := i.mp[key(item)]
 	if !found {
@@ -82,7 +72,6 @@ func (i *inmemStore) Read(ctx context.Context, item gkvstore.Item) error {
 }
 
 func (i *inmemStore) Update(ctx context.Context, item gkvstore.Item) error {
-	defer i.synchronize()()
 
 	if tt, ok := item.(gkvstore.TimeTracker); ok {
 		ttIdx, exists := i.ttIdx[item.GetNamespace()]
@@ -106,7 +95,6 @@ func (i *inmemStore) Update(ctx context.Context, item gkvstore.Item) error {
 }
 
 func (i *inmemStore) Delete(ctx context.Context, item gkvstore.Item) error {
-	defer i.synchronize()()
 
 	itemBuf, found := i.mp[key(item)]
 	if found {
@@ -141,9 +129,7 @@ func (i *inmemStore) List(
 				skip--
 				continue
 			}
-			i.lk.Lock()
 			val, found := i.mp[k]
-			i.lk.Unlock()
 			if !found {
 				// best effort continue
 				continue
@@ -164,7 +150,6 @@ func (i *inmemStore) List(
 	switch opts.Sort {
 	case gkvstore.SortNatural:
 		go func() {
-			defer i.synchronize()()
 			defer close(res)
 
 			count := 0
