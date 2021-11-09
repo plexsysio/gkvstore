@@ -60,12 +60,74 @@ func (t *testBStruct) Unmarshal(buf []byte) error {
 	return gob.NewDecoder(bw).Decode(t)
 }
 
-func BenchmarkCreate(sb *testing.B, st gkvstore.Store, size int) {
+func (t *testBStruct) edit(buf []byte) {
+	idx := rand.Intn(len(t.Val) - len(buf) - 1)
+	copy(t.Val[idx:idx+len(buf)], buf)
+}
+
+func (t *testBStruct) setKey(key string) {
+	t.Key = key
+}
+
+type testCStruct struct {
+	Key  string
+	Val  []byte
+	Size int64
+}
+
+func newStructC(size int) *testCStruct {
+	return &testCStruct{Size: int64(size)}
+}
+
+func (t *testCStruct) GetNamespace() string { return "testStruct" }
+
+func (t *testCStruct) GetID() string { return t.Key }
+
+func (t *testCStruct) SetID(id string) { t.Key = id }
+
+func (t *testCStruct) Marshal() ([]byte, error) {
+	if t.Val == nil {
+		t.Val = make([]byte, t.Size-32)
+		_, err := rand.Read(t.Val)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var buf bytes.Buffer
+	defer buf.Reset()
+	err := gob.NewEncoder(&buf).Encode(t)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (t *testCStruct) edit(buf []byte) {
+	idx := rand.Intn(len(t.Val) - len(buf) - 1)
+	copy(t.Val[idx:idx+len(buf)], buf)
+}
+
+func (t *testCStruct) setKey(key string) {
+	t.Key = key
+}
+
+type testStructHelper interface {
+	edit([]byte)
+	setKey(string)
+}
+
+func (t *testCStruct) Unmarshal(buf []byte) error {
+	bw := bytes.NewBuffer(buf)
+	defer bw.Reset()
+	return gob.NewDecoder(bw).Decode(t)
+}
+
+func BenchmarkCreate(sb *testing.B, st gkvstore.Store, newStruct func() gkvstore.Item) {
 	sb.ReportAllocs()
 	sb.ResetTimer()
 
 	for n := 0; n < sb.N; n++ {
-		it := newStruct(size)
+		it := newStruct()
 		err := st.Create(context.TODO(), it)
 		if err != nil {
 			sb.Fatal(err)
@@ -73,11 +135,11 @@ func BenchmarkCreate(sb *testing.B, st gkvstore.Store, size int) {
 	}
 }
 
-func BenchmarkUpdate(sb *testing.B, st gkvstore.Store, size int) {
+func BenchmarkUpdate(sb *testing.B, st gkvstore.Store, newStruct func() gkvstore.Item) {
 
-	var items []*testBStruct
+	var items []gkvstore.Item
 	for n := 0; n < sb.N; n++ {
-		it := newStruct(size)
+		it := newStruct()
 		err := st.Create(context.TODO(), it)
 		if err != nil {
 			sb.Fatal(err)
@@ -95,7 +157,7 @@ func BenchmarkUpdate(sb *testing.B, st gkvstore.Store, size int) {
 	sb.ResetTimer()
 
 	for _, v := range items {
-		copy(v.Val[:20], editBuf)
+		v.(testStructHelper).edit(editBuf)
 		err := st.Update(context.TODO(), v)
 		if err != nil {
 			sb.Fatal(err)
@@ -103,10 +165,10 @@ func BenchmarkUpdate(sb *testing.B, st gkvstore.Store, size int) {
 	}
 }
 
-func BenchmarkRead(sb *testing.B, st gkvstore.Store, size int) {
+func BenchmarkRead(sb *testing.B, st gkvstore.Store, newStruct func() gkvstore.Item) {
 
 	for n := 0; n < sb.N; n++ {
-		it := newStruct(size)
+		it := newStruct()
 		err := st.Create(context.TODO(), it)
 		if err != nil {
 			sb.Fatal(err)
@@ -117,8 +179,8 @@ func BenchmarkRead(sb *testing.B, st gkvstore.Store, size int) {
 	sb.ResetTimer()
 
 	for n := 0; n < sb.N; n++ {
-		it := newStruct(size)
-		it.Key = fmt.Sprintf("%d", n+1)
+		it := newStruct()
+		it.(testStructHelper).setKey(fmt.Sprintf("%d", n+1))
 
 		err := st.Read(context.TODO(), it)
 		if err != nil {
@@ -128,24 +190,48 @@ func BenchmarkRead(sb *testing.B, st gkvstore.Store, size int) {
 }
 
 func BenchmarkSuite(b *testing.B, st gkvstore.Store) {
-	b.Run("64B", func(sb *testing.B) {
-		sb.Run("Create", func(sb2 *testing.B) { BenchmarkCreate(sb2, st, 64) })
-		sb.Run("Read", func(sb2 *testing.B) { BenchmarkRead(sb2, st, 64) })
-		sb.Run("Update", func(sb2 *testing.B) { BenchmarkUpdate(sb2, st, 64) })
+	b.Run("With time tracker", func(sb1 *testing.B) {
+		sb1.Run("64B", func(sb2 *testing.B) {
+			sb2.Run("Create", func(sb3 *testing.B) { BenchmarkCreate(sb3, st, func() gkvstore.Item { return newStruct(64) }) })
+			sb2.Run("Read", func(sb3 *testing.B) { BenchmarkRead(sb3, st, func() gkvstore.Item { return newStruct(64) }) })
+			sb2.Run("Update", func(sb3 *testing.B) { BenchmarkUpdate(sb3, st, func() gkvstore.Item { return newStruct(64) }) })
+		})
+		sb1.Run("128B", func(sb2 *testing.B) {
+			sb2.Run("Create", func(sb3 *testing.B) { BenchmarkCreate(sb3, st, func() gkvstore.Item { return newStruct(128) }) })
+			sb2.Run("Read", func(sb3 *testing.B) { BenchmarkRead(sb3, st, func() gkvstore.Item { return newStruct(128) }) })
+			sb2.Run("Update", func(sb3 *testing.B) { BenchmarkUpdate(sb3, st, func() gkvstore.Item { return newStruct(128) }) })
+		})
+		sb1.Run("256B", func(sb2 *testing.B) {
+			sb2.Run("Create", func(sb3 *testing.B) { BenchmarkCreate(sb3, st, func() gkvstore.Item { return newStruct(256) }) })
+			sb2.Run("Read", func(sb3 *testing.B) { BenchmarkRead(sb3, st, func() gkvstore.Item { return newStruct(256) }) })
+			sb2.Run("Update", func(sb3 *testing.B) { BenchmarkUpdate(sb3, st, func() gkvstore.Item { return newStruct(256) }) })
+		})
+		sb1.Run("512B", func(sb2 *testing.B) {
+			sb2.Run("Create", func(sb3 *testing.B) { BenchmarkCreate(sb3, st, func() gkvstore.Item { return newStruct(512) }) })
+			sb2.Run("Read", func(sb3 *testing.B) { BenchmarkRead(sb3, st, func() gkvstore.Item { return newStruct(512) }) })
+			sb2.Run("Update", func(sb3 *testing.B) { BenchmarkUpdate(sb3, st, func() gkvstore.Item { return newStruct(512) }) })
+		})
 	})
-	b.Run("128B", func(sb *testing.B) {
-		sb.Run("Create", func(sb2 *testing.B) { BenchmarkCreate(sb2, st, 128) })
-		sb.Run("Read", func(sb2 *testing.B) { BenchmarkRead(sb2, st, 128) })
-		sb.Run("Update", func(sb2 *testing.B) { BenchmarkUpdate(sb2, st, 128) })
-	})
-	b.Run("256B", func(sb *testing.B) {
-		sb.Run("Create", func(sb2 *testing.B) { BenchmarkCreate(sb2, st, 256) })
-		sb.Run("Read", func(sb2 *testing.B) { BenchmarkRead(sb2, st, 256) })
-		sb.Run("Update", func(sb2 *testing.B) { BenchmarkUpdate(sb2, st, 256) })
-	})
-	b.Run("512B", func(sb *testing.B) {
-		sb.Run("Create", func(sb2 *testing.B) { BenchmarkCreate(sb2, st, 512) })
-		sb.Run("Read", func(sb2 *testing.B) { BenchmarkRead(sb2, st, 512) })
-		sb.Run("Update", func(sb2 *testing.B) { BenchmarkUpdate(sb2, st, 512) })
+	b.Run("Without time tracker", func(sb1 *testing.B) {
+		sb1.Run("64B", func(sb2 *testing.B) {
+			sb2.Run("Create", func(sb3 *testing.B) { BenchmarkCreate(sb3, st, func() gkvstore.Item { return newStructC(64) }) })
+			sb2.Run("Read", func(sb3 *testing.B) { BenchmarkRead(sb3, st, func() gkvstore.Item { return newStructC(64) }) })
+			sb2.Run("Update", func(sb3 *testing.B) { BenchmarkUpdate(sb3, st, func() gkvstore.Item { return newStructC(64) }) })
+		})
+		sb1.Run("128B", func(sb2 *testing.B) {
+			sb2.Run("Create", func(sb3 *testing.B) { BenchmarkCreate(sb3, st, func() gkvstore.Item { return newStructC(128) }) })
+			sb2.Run("Read", func(sb3 *testing.B) { BenchmarkRead(sb3, st, func() gkvstore.Item { return newStructC(128) }) })
+			sb2.Run("Update", func(sb3 *testing.B) { BenchmarkUpdate(sb3, st, func() gkvstore.Item { return newStructC(128) }) })
+		})
+		sb1.Run("256B", func(sb2 *testing.B) {
+			sb2.Run("Create", func(sb3 *testing.B) { BenchmarkCreate(sb3, st, func() gkvstore.Item { return newStructC(256) }) })
+			sb2.Run("Read", func(sb3 *testing.B) { BenchmarkRead(sb3, st, func() gkvstore.Item { return newStructC(256) }) })
+			sb2.Run("Update", func(sb3 *testing.B) { BenchmarkUpdate(sb3, st, func() gkvstore.Item { return newStructC(256) }) })
+		})
+		sb1.Run("512B", func(sb2 *testing.B) {
+			sb2.Run("Create", func(sb3 *testing.B) { BenchmarkCreate(sb3, st, func() gkvstore.Item { return newStructC(512) }) })
+			sb2.Run("Read", func(sb3 *testing.B) { BenchmarkRead(sb3, st, func() gkvstore.Item { return newStructC(512) }) })
+			sb2.Run("Update", func(sb3 *testing.B) { BenchmarkUpdate(sb3, st, func() gkvstore.Item { return newStructC(512) }) })
+		})
 	})
 }
