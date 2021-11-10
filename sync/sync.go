@@ -49,7 +49,22 @@ func (t *syncStore) Delete(ctx context.Context, item gkvstore.Item) error {
 
 func (t *syncStore) List(ctx context.Context, factory gkvstore.Factory, opts gkvstore.ListOpt) (<-chan *gkvstore.Result, error) {
 	t.mu.RLock()
-	defer t.mu.RUnlock()
 
-	return t.Store.List(context.TODO(), factory, opts)
+	resChan, err := t.Store.List(ctx, factory, opts)
+	if err != nil {
+		t.mu.RUnlock()
+		return resChan, err
+	}
+
+	relayChan := make(chan *gkvstore.Result)
+	go func() {
+		defer close(relayChan)
+		defer t.mu.RUnlock()
+
+		for res := range resChan {
+			relayChan <- res
+		}
+	}()
+
+	return relayChan, nil
 }
