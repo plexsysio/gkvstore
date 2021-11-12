@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package pbtest;
+
+option go_package = "github.com/plexsysio/gkvstore/autoencoding/internal/pbtest";
+
+message TestItem {
+  string name = 1;
+  string id = 2;
+  int64 val1 = 3;
+  string val2 = 4;
+}
