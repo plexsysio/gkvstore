@@ -3,12 +3,10 @@ package autoencoding
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"reflect"
 	"unicode"
 
 	"github.com/plexsysio/gkvstore"
-	"github.com/plexsysio/gkvstore/autoencoding/internal/gobpack"
 	"github.com/vmihailenco/msgpack/v5"
 	"google.golang.org/protobuf/proto"
 )
@@ -18,15 +16,14 @@ type Encoding int
 const (
 	Invalid Encoding = iota
 	JSON
-	Gob
 	MsgPack
 	Protobuf
 )
 
 type item struct {
 	val       interface{}
-	id        string
 	namespace string
+	id        string
 	encoding  Encoding
 }
 
@@ -38,23 +35,20 @@ type itemWithTimeTracker struct {
 
 func getEncoding(f reflect.StructField) Encoding {
 	if _, ok := f.Tag.Lookup("protobuf"); ok {
-		fmt.Println("Using protobuf")
 		return Protobuf
 	}
 	if _, ok := f.Tag.Lookup("json"); ok {
-		fmt.Println("Using JSON")
 		return JSON
 	}
 	if _, ok := f.Tag.Lookup("msgpack"); ok {
-		fmt.Println("Using MsgPack")
 		return MsgPack
 	}
-	fmt.Println("Using Gob")
-	return Gob
+	// If none is provided use JSON as default
+	return JSON
 }
 
 func newItem(val interface{}) (gkvstore.Item, error) {
-	foundId, foundNs, foundCreated, foundUpdated := false, false, false, false
+	foundId, foundCreated, foundUpdated := false, false, false
 	id, ns, created, updated := "", "", "", ""
 
 	rv := reflect.ValueOf(val)
@@ -62,6 +56,11 @@ func newItem(val interface{}) (gkvstore.Item, error) {
 		return nil, errors.New("incorrect value type: use pointer")
 	}
 	t := rv.Elem().Type()
+
+	if t.Name() == "" {
+		return nil, errors.New("incorrect name of type")
+	}
+	ns = t.Name()
 
 	var encoding Encoding
 	// Use first exported field for encoding
@@ -77,75 +76,48 @@ func newItem(val interface{}) (gkvstore.Item, error) {
 
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
-		if field.Name == "ID" || field.Name == "Id" {
+		tagval, ok := field.Tag.Lookup("aenc")
+		if (field.Name == "ID" || field.Name == "Id") || (ok && tagval == "id") {
 			if foundId {
 				return nil, errors.New("duplicate ID field configured")
+			}
+			if field.Type.Kind() != reflect.String {
+				return nil, errors.New("ID field should be string")
 			}
 			foundId = true
 			id = field.Name
 		}
-		if field.Name == "Namespace" {
-			if foundNs {
-				return nil, errors.New("duplicate Namespace field configured")
-			}
-			foundNs = true
-			ns = field.Name
-		}
-		if field.Name == "Created" || field.Name == "CreatedAt" {
+		if (field.Name == "Created" || field.Name == "CreatedAt") || (ok && tagval == "created") {
 			if foundCreated {
 				return nil, errors.New("duplicate Created field configured")
+			}
+			if field.Type.Kind() != reflect.Int64 {
+				return nil, errors.New("Created field should be uint64")
 			}
 			foundCreated = true
 			created = field.Name
 		}
-		if field.Name == "Updated" || field.Name == "UpdatedAt" {
+		if (field.Name == "Updated" || field.Name == "UpdatedAt") || (ok && tagval == "updated") {
 			if foundUpdated {
 				return nil, errors.New("duplicate Updated field configured")
+			}
+			if field.Type.Kind() != reflect.Int64 {
+				return nil, errors.New("Updated field should be uint64")
 			}
 			foundUpdated = true
 			updated = field.Name
 		}
-		if val, ok := field.Tag.Lookup("aenc"); ok {
-			if val == "id" {
-				if foundId && id != field.Name {
-					return nil, errors.New("duplicate ID field configured")
-				}
-				foundId = true
-				id = field.Name
-			}
-			if val == "namespace" && !foundNs {
-				if foundNs && ns != field.Name {
-					return nil, errors.New("duplicate Namespace field configured")
-				}
-				foundNs = true
-				ns = field.Name
-			}
-			if val == "created" {
-				if foundCreated && created != field.Name {
-					return nil, errors.New("duplicate Created field configured")
-				}
-				foundCreated = true
-				created = field.Name
-			}
-			if val == "updated" {
-				if foundUpdated && updated != field.Name {
-					return nil, errors.New("duplicate Updated field configured")
-				}
-				foundUpdated = true
-				updated = field.Name
-			}
-		}
 	}
 
-	if !foundId || !foundNs {
-		return nil, errors.New("ID and Namespace not configured")
+	if !foundId {
+		return nil, errors.New("ID field not configured")
 	}
 
 	if foundCreated && foundUpdated {
 		return &itemWithTimeTracker{
 			item: &item{
-				id:        id,
 				namespace: ns,
+				id:        id,
 				encoding:  encoding,
 				val:       val,
 			},
@@ -155,8 +127,8 @@ func newItem(val interface{}) (gkvstore.Item, error) {
 	}
 
 	return &item{
-		id:        id,
 		namespace: ns,
+		id:        id,
 		encoding:  encoding,
 		val:       val,
 	}, nil
@@ -175,8 +147,7 @@ func MustNew(val interface{}) gkvstore.Item {
 }
 
 func (i *item) GetNamespace() string {
-	v := reflect.ValueOf(i.val).Elem()
-	return v.FieldByName(i.namespace).String()
+	return i.namespace
 }
 
 func (i *item) GetID() string {
@@ -193,8 +164,6 @@ func (i *item) Marshal() ([]byte, error) {
 	switch i.encoding {
 	case JSON:
 		return json.Marshal(i.val)
-	case Gob:
-		return gobpack.Marshal(i.val)
 	case MsgPack:
 		return msgpack.Marshal(i.val)
 	case Protobuf:
@@ -207,8 +176,6 @@ func (i *item) Unmarshal(buf []byte) error {
 	switch i.encoding {
 	case JSON:
 		return json.Unmarshal(buf, i.val)
-	case Gob:
-		return gobpack.Unmarshal(buf, i.val)
 	case MsgPack:
 		return msgpack.Unmarshal(buf, i.val)
 	case Protobuf:

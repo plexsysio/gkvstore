@@ -23,28 +23,28 @@ func (t *syncStore) Create(ctx context.Context, item gkvstore.Item) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	return t.Store.Create(context.TODO(), item)
+	return t.Store.Create(ctx, item)
 }
 
 func (t *syncStore) Read(ctx context.Context, item gkvstore.Item) error {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	return t.Store.Read(context.TODO(), item)
+	return t.Store.Read(ctx, item)
 }
 
 func (t *syncStore) Update(ctx context.Context, item gkvstore.Item) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	return t.Store.Update(context.TODO(), item)
+	return t.Store.Update(ctx, item)
 }
 
 func (t *syncStore) Delete(ctx context.Context, item gkvstore.Item) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	return t.Store.Delete(context.TODO(), item)
+	return t.Store.Delete(ctx, item)
 }
 
 func (t *syncStore) List(ctx context.Context, factory gkvstore.Factory, opts gkvstore.ListOpt) (<-chan *gkvstore.Result, error) {
