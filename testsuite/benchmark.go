@@ -48,7 +48,6 @@ type testCStruct struct {
 
 func newStructC(size int) *testCStruct {
 	buf := make([]byte, size)
-	_, _ = rand.Read(buf)
 	return &testCStruct{Val: buf, Size: int64(size)}
 }
 
@@ -66,6 +65,35 @@ func (t *testCStruct) setKey(key string) {
 }
 
 func (t *testCStruct) getKey() string {
+	return t.Key
+}
+
+type testDStruct struct {
+	Key  string `msgpack:"key" aenc:"id"`
+	Val  []byte `msgpack:"val"`
+	Size int64  `msgpack:"size"`
+}
+
+func newStructD(size int) *testDStruct {
+	buf := make([]byte, size)
+	_, _ = rand.Read(buf)
+	return &testDStruct{Val: buf, Size: int64(size)}
+}
+
+func (t *testDStruct) fillRandom() {
+	_, _ = rand.Read(t.Val)
+}
+
+func (t *testDStruct) edit(buf []byte) {
+	idx := rand.Intn(len(t.Val) - len(buf) - 1)
+	copy(t.Val[idx:idx+len(buf)], buf)
+}
+
+func (t *testDStruct) setKey(key string) {
+	t.Key = key
+}
+
+func (t *testDStruct) getKey() string {
 	return t.Key
 }
 
@@ -150,58 +178,63 @@ func BenchmarkRead(sb *testing.B, st gkvstore.Store, newStruct func() interface{
 }
 
 func BenchmarkSuite(b *testing.B, st gkvstore.Store) {
-	ctorA := func(size int) func() interface{} {
-		return func() interface{} {
-			return newStruct(size)
-		}
+	for _, tc := range []struct {
+		Name string
+		Ctor func() interface{}
+	}{
+		{
+			Name: "JSON 64B WithTimeTracker",
+			Ctor: func() interface{} { return newStruct(64) },
+		},
+		{
+			Name: "JSON 128B WithTimeTracker",
+			Ctor: func() interface{} { return newStruct(128) },
+		},
+		{
+			Name: "JSON 256B WithTimeTracker",
+			Ctor: func() interface{} { return newStruct(256) },
+		},
+		{
+			Name: "JSON 512B WithTimeTracker",
+			Ctor: func() interface{} { return newStruct(512) },
+		},
+		{
+			Name: "JSON 64B WithoutTimeTracker",
+			Ctor: func() interface{} { return newStructC(64) },
+		},
+		{
+			Name: "JSON 128B WithoutTimeTracker",
+			Ctor: func() interface{} { return newStructC(128) },
+		},
+		{
+			Name: "JSON 256B WithoutTimeTracker",
+			Ctor: func() interface{} { return newStructC(256) },
+		},
+		{
+			Name: "JSON 512B WithoutTimeTracker",
+			Ctor: func() interface{} { return newStructC(512) },
+		},
+		{
+			Name: "Msgpack 64B WithoutTimeTracker",
+			Ctor: func() interface{} { return newStructD(64) },
+		},
+		{
+			Name: "Msgpack 128B WithoutTimeTracker",
+			Ctor: func() interface{} { return newStructD(128) },
+		},
+		{
+			Name: "Msgpack 256B WithoutTimeTracker",
+			Ctor: func() interface{} { return newStructD(256) },
+		},
+		{
+			Name: "Msgpack 512B WithoutTimeTracker",
+			Ctor: func() interface{} { return newStructD(512) },
+		},
+	} {
+		b.Run(tc.Name, func(sb1 *testing.B) {
+			sb1.Run("Create", func(sb2 *testing.B) { BenchmarkCreate(sb2, st, tc.Ctor) })
+			sb1.Run("Read", func(sb2 *testing.B) { BenchmarkRead(sb2, st, tc.Ctor) })
+			sb1.Run("Update", func(sb2 *testing.B) { BenchmarkUpdate(sb2, st, tc.Ctor) })
+		})
 	}
-	ctorB := func(size int) func() interface{} {
-		return func() interface{} {
-			return newStructC(size)
-		}
-	}
-	b.Run("With time tracker", func(sb1 *testing.B) {
-		sb1.Run("64B", func(sb2 *testing.B) {
-			sb2.Run("Create", func(sb3 *testing.B) { BenchmarkCreate(sb3, st, ctorA(64)) })
-			sb2.Run("Read", func(sb3 *testing.B) { BenchmarkRead(sb3, st, ctorA(64)) })
-			sb2.Run("Update", func(sb3 *testing.B) { BenchmarkUpdate(sb3, st, ctorA(64)) })
-		})
-		sb1.Run("128B", func(sb2 *testing.B) {
-			sb2.Run("Create", func(sb3 *testing.B) { BenchmarkCreate(sb3, st, ctorA(128)) })
-			sb2.Run("Read", func(sb3 *testing.B) { BenchmarkRead(sb3, st, ctorA(128)) })
-			sb2.Run("Update", func(sb3 *testing.B) { BenchmarkUpdate(sb3, st, ctorA(128)) })
-		})
-		sb1.Run("256B", func(sb2 *testing.B) {
-			sb2.Run("Create", func(sb3 *testing.B) { BenchmarkCreate(sb3, st, ctorA(256)) })
-			sb2.Run("Read", func(sb3 *testing.B) { BenchmarkRead(sb3, st, ctorA(256)) })
-			sb2.Run("Update", func(sb3 *testing.B) { BenchmarkUpdate(sb3, st, ctorA(256)) })
-		})
-		sb1.Run("512B", func(sb2 *testing.B) {
-			sb2.Run("Create", func(sb3 *testing.B) { BenchmarkCreate(sb3, st, ctorA(512)) })
-			sb2.Run("Read", func(sb3 *testing.B) { BenchmarkRead(sb3, st, ctorA(512)) })
-			sb2.Run("Update", func(sb3 *testing.B) { BenchmarkUpdate(sb3, st, ctorA(512)) })
-		})
-	})
-	b.Run("Without time tracker", func(sb1 *testing.B) {
-		sb1.Run("64B", func(sb2 *testing.B) {
-			sb2.Run("Create", func(sb3 *testing.B) { BenchmarkCreate(sb3, st, ctorB(64)) })
-			sb2.Run("Read", func(sb3 *testing.B) { BenchmarkRead(sb3, st, ctorB(64)) })
-			sb2.Run("Update", func(sb3 *testing.B) { BenchmarkUpdate(sb3, st, ctorB(64)) })
-		})
-		sb1.Run("128B", func(sb2 *testing.B) {
-			sb2.Run("Create", func(sb3 *testing.B) { BenchmarkCreate(sb3, st, ctorB(128)) })
-			sb2.Run("Read", func(sb3 *testing.B) { BenchmarkRead(sb3, st, ctorB(128)) })
-			sb2.Run("Update", func(sb3 *testing.B) { BenchmarkUpdate(sb3, st, ctorB(128)) })
-		})
-		sb1.Run("256B", func(sb2 *testing.B) {
-			sb2.Run("Create", func(sb3 *testing.B) { BenchmarkCreate(sb3, st, ctorB(256)) })
-			sb2.Run("Read", func(sb3 *testing.B) { BenchmarkRead(sb3, st, ctorB(256)) })
-			sb2.Run("Update", func(sb3 *testing.B) { BenchmarkUpdate(sb3, st, ctorB(256)) })
-		})
-		sb1.Run("512B", func(sb2 *testing.B) {
-			sb2.Run("Create", func(sb3 *testing.B) { BenchmarkCreate(sb3, st, ctorB(512)) })
-			sb2.Run("Read", func(sb3 *testing.B) { BenchmarkRead(sb3, st, ctorB(512)) })
-			sb2.Run("Update", func(sb3 *testing.B) { BenchmarkUpdate(sb3, st, ctorB(512)) })
-		})
-	})
 }
