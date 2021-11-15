@@ -20,6 +20,10 @@ const (
 	Protobuf
 )
 
+type ObjectGetter interface {
+	Get() interface{}
+}
+
 type item struct {
 	val       interface{}
 	namespace string
@@ -158,6 +162,10 @@ func (i *item) GetID() string {
 func (i *item) SetID(id string) {
 	v := reflect.ValueOf(i.val).Elem()
 	v.FieldByName(i.id).SetString(id)
+}
+
+func (i *item) Get() interface{} {
+	return i.val
 }
 
 func (i *item) Marshal() ([]byte, error) {
