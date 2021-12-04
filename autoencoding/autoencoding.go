@@ -161,7 +161,12 @@ func (i *item) GetID() string {
 
 func (i *item) SetID(id string) {
 	v := reflect.ValueOf(i.val).Elem()
-	v.FieldByName(i.id).SetString(id)
+	// Ideally there should be some tag field to specify if we should use this
+	// setter or not. For now, we will check if ID was set already, we will use
+	// that, else set
+	if v.FieldByName(i.id).String() == "" {
+		v.FieldByName(i.id).SetString(id)
+	}
 }
 
 func (i *item) Get() interface{} {
